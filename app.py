@@ -1,202 +1,183 @@
-import streamlit as st
 import folium
-from streamlit_folium import st_folium
-from folium.plugins import Draw, Geocoder
-from shapely.geometry import shape
+from folium.plugins import Draw
 import pyproj
+import requests
+from shapely.geometry import Polygon
+from streamlit_folium import st_folium
+import streamlit as st
 
-# Page configuration
 st.set_page_config(
-    page_title="Lawn Cutting GPS & Pricing App",
+    page_title="Lawn Cutting GPS & Pricing Calculator",
     page_icon="🌿",
-    layout="wide"
+    layout="wide",
 )
 
-# --- SIDEBAR: PRICING & RATE SETTINGS ---
-st.sidebar.header("⚙️ Pricing & Rate Settings")
+st.title("🌿 Lawn Cutting Business GPS & Pricing")
+st.markdown(
+    "Map properties, measure area & perimeters, handle obstacles, and generate"
+    " client quotes instantly."
+)
 
-st.sidebar.subheader("Fuel & Labor")
-petrol_price = st.sidebar.number_input("Current Petrol Price (R/L)", min_value=0.0, max_value=50.0, value=24.50, step=0.5)
-hourly_rate = st.sidebar.number_input("Labor Rate per Hour (R)", min_value=0.0, max_value=1000.0, value=150.0, step=10.0)
-transport_fee = st.sidebar.number_input("Transport / Travel Fee (R)", min_value=0.0, max_value=1000.0, value=50.0, step=10.0)
+# --- SIDEBAR: Pricing & Fleet Variables ---
+st.sidebar.header("⚙️ Business & Pricing Settings")
 
-st.sidebar.subheader("Machine Fuel Burn (Litres/Hour)")
-blue_burn = st.sidebar.number_input("Big Blue Mower (L/hr)", min_value=0.0, max_value=10.0, value=2.5, step=0.1)
-red_burn = st.sidebar.number_input("3-Wheel Red Mower (L/hr)", min_value=0.0, max_value=10.0, value=2.0, step=0.1)
-brush_burn = st.sidebar.number_input("Brush Cutters (L/hr each)", min_value=0.0, max_value=10.0, value=1.2, step=0.1)
+st.sidebar.subheader("Fleet Productivity")
+big_blue_rate = st.sidebar.number_input(
+    "Big Blue Mower (m²/hr)", value=500.0, step=50.0
+)
+red_mower_rate = st.sidebar.number_input(
+    "3-Wheel Red Mower (m²/hr)", value=300.0, step=50.0
+)
+brush_cutter_rate = st.sidebar.number_input(
+    "Brush Cutters (m/hr for edges)", value=160.0, step=20.0
+)
 
-st.sidebar.subheader("Profit & Markup")
-profit_margin = st.sidebar.slider("Labor, Wear & Profit Markup (%)", min_value=0, max_value=50, value=20, step=5)
+st.sidebar.subheader("Cost Rates")
+petrol_price = st.sidebar.number_input(
+    "Petrol Price per Litre (R)", value=25.0, step=1.0
+)
+fuel_consumption = st.sidebar.number_input(
+    "Fuel Consumption (L/hr)", value=1.5, step=0.1
+)
+labor_rate = st.sidebar.number_input(
+    "Labor Rate per Hour (R/hr)", value=60.0, step=5.0
+)
+transport_fee = st.sidebar.number_input(
+    "Base Transport Fee (R)", value=150.0, step=10.0
+)
+profit_margin = st.sidebar.slider(
+    "Target Profit Margin (%)", min_value=10, max_value=100, value=30, step=5
+)
 
-# --- MAIN APP INTERFACE ---
-st.title("🌿 Lawn Cutting GPS & Pricing Calculator")
-st.write("Map out properties, measure edges & areas automatically, detect hazard zones, and generate instant client quotations.")
+# --- MAIN INTERFACE: Address Search & Map ---
+st.subheader("📍 Map & Property Assessment")
+st.write(
+    "Type an address or location below to center the map, then draw your lawn"
+    " boundary polygon and drop hazard pins."
+)
 
-# --- HELPER FUNCTION TO CALCULATE AREA & PERIMETER ---
-def get_polygon_metrics(geojson_geometry):
-    try:
-        poly = shape(geojson_geometry)
-        geod = pyproj.Geod(ellps="WGS84")
-        # geometry_area_perimeter returns (area in sq meters, perimeter in meters)
-        area_sqm, perimeter_m = geod.geometry_area_perimeter(poly)
-        return abs(area_sqm), abs(perimeter_m)
-    except Exception:
-        return 0.0, 0.0
+# Mobile-friendly search box
+search_address = st.text_input(
+    "🔍 Search Address",
+    placeholder="e.g., 123 Main Road, Johannesburg or Suburb name",
+)
 
-# --- SECTION 1: PROPERTY MAP & YARD DRAWING ---
-st.header("1. Property Map & Hazard Detection")
-st.write("🔍 Search the address on the top-right, draw the lawn boundary polygon, and drop pins on obstacles/danger zones.")
+# Default coordinates (Johannesburg area)
+center_lat, center_lon = -26.2041, 28.0473
+zoom = 13
 
-m = folium.Map(location=[-26.2041, 28.0473], zoom_start=18, tiles="Esri.WorldImagery")
+if search_address:
+  try:
+    url = f"https://nominatim.openstreetmap.org/search?q={search_address}&format=json"
+    headers = {"User-Agent": "LawnCuttingApp/1.0"}
+    response = requests.get(url, headers=headers).json()
+    if response:
+      center_lat = float(response[0]["lat"])
+      center_lon = float(response[0]["lon"])
+      zoom = 19  # Zoom in close to property level
+      st.success(f"📍 Centered on: {response[0]['display_name']}")
+    else:
+      st.warning(
+          "Address not found. Try adding the city or suburb name (e.g., 'Sandton,"
+          " Johannesburg')."
+      )
+  except Exception:
+    st.error("Could not reach location search. Please try again.")
 
-# Add Search Bar (Geocoder)
-Geocoder(
-    position="topright",
-    collapsed=False,
-    placeholder="Search address or location...",
-    add_marker=True
+# Create Folium Map with Satellite Tile Layer (Esri World Imagery)
+m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom)
+
+folium.TileLayer(
+    tiles=(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/"
+        "MapServer/tile/{z}/{y}/{x}"
+    ),
+    attr="Esri",
+    name="Esri Satellite",
+    overlay=False,
+    control=True,
 ).add_to(m)
 
-# Add Drawing Tools
+# Add Draw plugin for polygon boundaries and markers
 draw = Draw(
     export=False,
-    position="topleft",
     draw_options={
         "polyline": False,
         "rectangle": True,
         "polygon": True,
         "circle": False,
-        "marker": True,  # Used for hazard pins
+        "marker": True,
         "circlemarker": False,
     },
-    edit_options={"edit": True}
+    edit_options={"edit": True},
 )
 draw.add_to(m)
 
-# Render map
-map_output = st_folium(m, width=900, height=450)
+# Render map in Streamlit
+map_output = st_folium(m, width=700, height=500)
 
-# --- EXTRACT DATA & AUTOMATICALLY MEASURE EDGES/AREAS ---
-measured_area = 500.0  # Default fallback
-measured_edges = 60.0  # Default fallback
+# --- CALCULATIONS & RESULTS ---
+lawn_size = 0.0
+edge_length = 0.0
 hazard_count = 0
-hazard_edge_buffer = 0.0
 
 if map_output and "all_drawings" in map_output and map_output["all_drawings"]:
-    for drawing in map_output["all_drawings"]:
-        geom_type = drawing["geometry"]["type"]
-        if geom_type in ["Polygon", "Rectangle"]:
-            calc_area, calc_perim = get_polygon_metrics(drawing["geometry"])
-            if calc_area > 0:
-                measured_area = calc_area
-                measured_edges = calc_perim
-        elif geom_type == "Point":
-            hazard_count += 1
-            # Each hazard pin automatically adds 8 meters of edge trimming around the obstacle
-            hazard_edge_buffer += 8.0
+  drawings = map_output["all_drawings"]
 
-total_edges = measured_edges + hazard_edge_buffer
+  for shape in drawings:
+    if shape["geometry"]["type"] in ["Polygon", "Rectangle"]:
+      coords = shape["geometry"]["coordinates"][0]
+      geod = pyproj.Geod(ellps="WGS84")
+      lats = [c[1] for c in coords]
+      lons = [c[0] for c in coords]
+      area, perimeter = geod.polygon_area_perimeter(lons, lats)
+      lawn_size += abs(area)
+      edge_length += perimeter
 
-# --- SECTION 2: YARD SPECS & EQUIPMENT ---
-st.header("2. Yard Specs & Equipment Deployed")
+    elif shape["geometry"]["type"] == "Point":
+      hazard_count += 1
 
-col_1, col_2 = st.columns(2)
+# Apply Hazard adjustments (8m extra edge per pin, 0.15hr time buffer per pin)
+extra_edge_from_hazards = hazard_count * 8.0
+total_edge = edge_length + extra_edge_from_hazards
 
-with col_1:
-    if measured_area != 500.0:
-        st.success(f"🎯 Auto-measured: **{measured_area:.1f} m² area** & **{total_edges:.1f} m total edges**")
-    else:
-        st.info("💡 Draw a polygon on the map above to auto-calculate area and border edges.")
+mowing_hours = lawn_size / big_blue_rate if big_blue_rate > 0 else 0
+edge_hours = total_edge / brush_cutter_rate if brush_cutter_rate > 0 else 0
+hazard_buffer_hours = hazard_count * 0.15
 
-    lawn_size = st.number_input("Lawn Size (square meters)", min_value=10.0, max_value=50000.0, value=float(round(measured_area, 1)), step=10.0)
-    edge_length = st.number_input("Edge / Border Length (meters)", min_value=0.0, max_value=5000.0, value=float(round(total_edges, 1)), step=5.0)
-    
-    condition = st.selectbox(
-        "Grass Height & Condition",
-        [
-            "Standard Summer Maintenance (1.0x)", 
-            "Slightly Overgrown / Medium (1.2x)", 
-            "Heavy Overgrowth / Thick Grass (1.4x)"
-        ]
-    )
+total_work_hours = mowing_hours + edge_hours + hazard_buffer_hours
+total_fuel_litres = total_work_hours * fuel_consumption
 
-with col_2:
-    st.write("**Active Fleet Selection:**")
-    use_blue = st.checkbox("Big Blue Mower (Large open areas)", value=True)
-    use_red = st.checkbox("3-Wheel Red Mower (Medium / Corners)", value=True)
-    use_brush = st.checkbox("2x Brush Cutters (Edges & Fences)", value=True)
-    
-    if hazard_count > 0:
-        st.warning(f"⚠️ Detected {hazard_count} hazard pin(s) (+{hazard_edge_buffer}m edge trimming added).")
+fuel_cost = total_fuel_litres * petrol_price
+labor_cost = total_work_hours * labor_rate
+subtotal = fuel_cost + labor_cost + transport_fee
+final_price = subtotal * (1 + profit_margin / 100)
+
+# --- DISPLAY QUOTE & METRICS ---
+st.markdown("---")
+st.subheader("📊 Property Assessment Results")
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Lawn Area", f"{lawn_size:.1f} m²")
+col2.metric("Border Edges", f"{total_edge:.1f} m")
+col3.metric("Hazard Pins", f"{hazard_count}")
+col4.metric("Est. Time", f"{total_work_hours:.2f} hrs")
+
+with st.expander("🛠️ View Itemized Financial Breakdown"):
+  st.write(f"**Estimated Operation Time:** {total_work_hours:.2f} hours")
+  st.write(
+      f"**Fuel Required:** {total_fuel_litres:.1f} Litres (at R"
+      f" {petrol_price}/L = R {fuel_cost:.2f})"
+  )
+  st.write(f"**Labor Cost:** R {labor_cost:.2f}")
+  st.write(f"**Transport Fee:** R {transport_fee:.2f}")
+  st.write(f"**Markup ({profit_margin}%):** R {final_price - subtotal:.2f}")
 
 st.markdown("---")
-
-# --- CALCULATION LOGIC ---
-blue_rate = 500.0   # m2 per hour
-red_rate = 300.0    # m2 per hour
-brush_rate = 160.0  # linear meters per hour (combined for 2 brush cutters)
-
-mower_hours = 0.0
-if use_blue and use_red:
-    mower_hours = lawn_size / ((blue_rate + red_rate) / 2.0)
-elif use_blue:
-    mower_hours = lawn_size / blue_rate
-elif use_red:
-    mower_hours = lawn_size / red_rate
-else:
-    mower_hours = lawn_size / 200.0
-
-edge_hours = (edge_length / brush_rate) if use_brush else 0.0
-total_base_hours = mower_hours + edge_hours
-
-multiplier = 1.0
-if "Slightly" in condition:
-    multiplier = 1.2
-elif "Heavy" in condition:
-    multiplier = 1.4
-
-hazard_time_buffer = hazard_count * 0.15 
-total_work_hours = (total_base_hours * multiplier) + hazard_time_buffer
-
-# Fuel calculation based on active machines
-active_machines_count = sum([use_blue, use_red, use_brush])
-avg_burn_rate = ((blue_burn if use_blue else 0) + (red_burn if use_red else 0) + ((brush_burn * 2) if use_brush else 0)) / max(1, active_machines_count)
-total_fuel_litres = total_work_hours * avg_burn_rate
-
-fuel_expense = total_fuel_litres * petrol_price
-labor_cost = total_work_hours * hourly_rate
-subtotal = labor_cost + fuel_expense + transport_fee
-final_price = subtotal * (1.0 + (profit_margin / 100.0))
-price_per_sqm = final_price / max(1.0, lawn_size)
-
-# --- SECTION 3: COST BREAKDOWN & QUOTATION SUMMARY ---
-st.header("3. Cost Breakdown & Quotation Summary")
-
-metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-with metric_col1:
-    st.metric("Total Yard Size", f"{lawn_size:.1f} m²")
-with metric_col2:
-    st.metric("Total Edges / Borders", f"{edge_length:.1f} m")
-with metric_col3:
-    st.metric("Total Fuel Needed", f"{total_fuel_litres:.1f} L")
-with metric_col4:
-    st.metric("Recommended Quote", f"R {final_price:.2f}", delta=f"R {price_per_sqm:.2f} / m²")
-
-with st.expander("📊 View Itemized Financial Breakdown"):
-    st.write(f"- **Property Area:** {lawn_size:.1f} m²")
-    st.write(f"- **Edge / Border Length:** {edge_length:.1f} meters (includes {hazard_edge_buffer}m from {hazard_count} hazard markers)")
-    st.write(f"- **Grass Condition Modifier:** {condition}")
-    st.write(f"- **Estimated Operation Time:** {total_work_hours:.2f} hours")
-    st.write(f"- **Fuel Required:** {total_fuel_litres:.1f} Litres (at R {petrol_price}/L = R {fuel_expense:.2f})")
-    st.write(f"- **Labor Cost:** R {labor_cost:.2f}")
-    st.write(f"- **Transport Fee:** R {transport_fee:.2f}")
-    st.write(f"- **Markup ({profit_margin}%):** R {final_price - subtotal:.2f}")
-
-st.markdown("---")
-
 st.subheader("💬 Client WhatsApp Message")
 whatsapp_text = (
-    f"Hi! Based on our property assessment ({lawn_size:.0f} m² lawn, {edge_length:.0f}m edges), "
-    f"our quotation for cutting and clearing is R{final_price:.2f}. Let us know if you'd like to book!"
+    f"Hi! Based on our property assessment ({lawn_size:.0f} m² lawn,"
+    f" {total_edge:.0f}m edges), our quotation for cutting and clearing is"
+    f" R{final_price:.2f}. Let us know if you'd like to book!"
 )
 st.text_area("Copy message to send via WhatsApp:", value=whatsapp_text)
