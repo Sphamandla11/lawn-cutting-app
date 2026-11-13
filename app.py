@@ -52,39 +52,49 @@ profit_margin = st.sidebar.slider(
 # --- MAIN INTERFACE: Address Search & Map ---
 st.subheader("📍 Map & Property Assessment")
 st.write(
-    "Type an address or location below to center the map, then draw your lawn"
-    " boundary polygon and drop hazard pins."
+    "Type an address below and click Search to center the map, then draw your"
+    " lawn boundary and drop hazard pins."
 )
 
-# Mobile-friendly search box with safe URL query parameter encoding
-search_address = st.text_input(
-    "🔍 Search Address",
-    placeholder="e.g., Utrecht, KwaZulu-Natal or Johannesburg",
-)
+# Use session state to remember coordinates across reruns
+if "center_lat" not in st.session_state:
+  st.session_state.center_lat = -26.2041
+if "center_lon" not in st.session_state:
+  st.session_state.center_lon = 28.0473
+if "zoom" not in st.session_state:
+  st.session_state.zoom = 13
 
-# Default coordinates (Johannesburg area)
-center_lat, center_lon = -26.2041, 28.0473
-zoom = 13
+# Wrap search in a form to prevent 429 rate limit errors on every keystroke
+with st.form(key="search_form"):
+  search_address = st.text_input(
+      "🔍 Search Address",
+      placeholder="e.g., Utrecht, KwaZulu-Natal",
+  )
+  submit_search = st.form_submit_button(label="Search Location")
 
-if search_address:
+if submit_search and search_address:
   try:
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {"User-Agent": "LawnCuttingApp/1.0"}
+    headers = {"User-Agent": "LawnCuttingApp/1.0 (Contact: local-user)"}
     params = {"q": search_address, "format": "json"}
     response = requests.get(url, params=params, headers=headers, timeout=5)
 
     if response.status_code == 200:
       data = response.json()
       if data:
-        center_lat = float(data[0]["lat"])
-        center_lon = float(data[0]["lon"])
-        zoom = 17  # Zoom in close to property level
+        st.session_state.center_lat = float(data[0]["lat"])
+        st.session_state.center_lon = float(data[0]["lon"])
+        st.session_state.zoom = 17  # Zoom in close to property level
         st.success(f"📍 Centered on: {data[0]['display_name']}")
       else:
         st.warning(
             "Address not found. Try typing the full town or city name (e.g.,"
             " 'Utrecht, KwaZulu-Natal')."
         )
+    elif response.status_code == 429:
+      st.error(
+          "Too many requests! Please wait a few seconds before searching again."
+      )
     else:
       st.error(
           f"Search service returned an error (Status {response.status_code})."
@@ -95,7 +105,10 @@ if search_address:
     )
 
 # Create Folium Map with Satellite Tile Layer (Esri World Imagery)
-m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom)
+m = folium.Map(
+    location=[st.session_state.center_lat, st.session_state.center_lon],
+    zoom_start=st.session_state.zoom,
+)
 
 folium.TileLayer(
     tiles=(
