@@ -56,10 +56,10 @@ st.write(
     " boundary polygon and drop hazard pins."
 )
 
-# Mobile-friendly search box
+# Mobile-friendly search box with safe URL query parameter encoding
 search_address = st.text_input(
     "🔍 Search Address",
-    placeholder="e.g., 123 Main Road, Johannesburg or Suburb name",
+    placeholder="e.g., Utrecht, KwaZulu-Natal or Johannesburg",
 )
 
 # Default coordinates (Johannesburg area)
@@ -68,21 +68,31 @@ zoom = 13
 
 if search_address:
   try:
-    url = f"https://nominatim.openstreetmap.org/search?q={search_address}&format=json"
+    url = "https://nominatim.openstreetmap.org/search"
     headers = {"User-Agent": "LawnCuttingApp/1.0"}
-    response = requests.get(url, headers=headers).json()
-    if response:
-      center_lat = float(response[0]["lat"])
-      center_lon = float(response[0]["lon"])
-      zoom = 19  # Zoom in close to property level
-      st.success(f"📍 Centered on: {response[0]['display_name']}")
+    params = {"q": search_address, "format": "json"}
+    response = requests.get(url, params=params, headers=headers, timeout=5)
+
+    if response.status_code == 200:
+      data = response.json()
+      if data:
+        center_lat = float(data[0]["lat"])
+        center_lon = float(data[0]["lon"])
+        zoom = 17  # Zoom in close to property level
+        st.success(f"📍 Centered on: {data[0]['display_name']}")
+      else:
+        st.warning(
+            "Address not found. Try typing the full town or city name (e.g.,"
+            " 'Utrecht, KwaZulu-Natal')."
+        )
     else:
-      st.warning(
-          "Address not found. Try adding the city or suburb name (e.g., 'Sandton,"
-          " Johannesburg')."
+      st.error(
+          f"Search service returned an error (Status {response.status_code})."
       )
   except Exception:
-    st.error("Could not reach location search. Please try again.")
+    st.error(
+        "Could not reach location search. Please check your internet connection."
+    )
 
 # Create Folium Map with Satellite Tile Layer (Esri World Imagery)
 m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom)
